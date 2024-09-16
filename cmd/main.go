@@ -1,6 +1,8 @@
 package main
 
 import (
+	"encoding/json"
+	"flag"
 	"fmt"
 	"image"
 	"image/color"
@@ -8,6 +10,8 @@ import (
 	"image/jpeg"
 	"image/png"
 	"os"
+	"strconv"
+	"strings"
 
 	"github.com/nfnt/resize"
 )
@@ -36,7 +40,7 @@ func dominantColor(img image.Image) color.Color {
 	return maxColor
 }
 
-// 將圖片等分成32個區塊
+// 將圖片等分成多個區塊
 func splitImage(img image.Image, rows, cols int) []image.Image {
 	bounds := img.Bounds()
 	width, height := bounds.Max.X/cols, bounds.Max.Y/rows
@@ -71,8 +75,32 @@ func fillImageWithColors(colors []color.Color, imgWidth, imgHeight, rows, cols i
 }
 
 func main() {
+	// 解析命令行參數
+	inputPath := flag.String("input", "image.jpg", "Path to the input image file.")
+	outputPath := flag.String("output", "output.png", "Path to the output image file.")
+	jsonPath := flag.String("json", "colors.json", "Path to the JSON file for color information.")
+	grid := flag.String("grid", "4x8", "Grid size in rowsxcols format.")
+	flag.Parse()
+
+	// 解析 grid 參數
+	gridParts := strings.Split(*grid, "x")
+	if len(gridParts) != 2 {
+		fmt.Println("Invalid grid format. Use rowsxcols format.")
+		return
+	}
+	rows, err := strconv.Atoi(gridParts[0])
+	if err != nil {
+		fmt.Println("Invalid rows value:", err)
+		return
+	}
+	cols, err := strconv.Atoi(gridParts[1])
+	if err != nil {
+		fmt.Println("Invalid cols value:", err)
+		return
+	}
+
 	// 開啟圖片
-	file, err := os.Open("image.jpg")
+	file, err := os.Open(*inputPath)
 	if err != nil {
 		fmt.Println("Error opening image:", err)
 		return
@@ -89,24 +117,47 @@ func main() {
 	// 調整圖片大小，確保圖片的維度可以均分
 	img = resize.Resize(320, 320, img, resize.Lanczos3)
 
-	// 將圖片等分成32格 (4行x8列)
-	rows, cols := 4, 8
+	// 將圖片等分成多個區塊
 	subImages := splitImage(img, rows, cols)
 
 	// 對每一格計算最多的顏色
 	var dominantColors []color.Color
+	colorInfo := make([]map[string]interface{}, 0)
 	for i, subImg := range subImages {
 		dominant := dominantColor(subImg)
 		dominantColors = append(dominantColors, dominant)
 		r, g, b, _ := dominant.RGBA()
-		fmt.Printf("Sub-image %d dominant color: #%02x%02x%02x\n", i+1, r>>8, g>>8, b>>8)
+		colorHex := fmt.Sprintf("#%02x%02x%02x", r>>8, g>>8, b>>8)
+		colorInfo = append(colorInfo, map[string]interface{}{
+			"subimage": i + 1,
+			"color":    colorHex,
+		})
+		fmt.Printf("Sub-image %d dominant color: %s\n", i+1, colorHex)
+	}
+
+	// 輸出顏色資訊到 JSON 文件
+	if *jsonPath != "" {
+		jsonFile, err := os.Create(*jsonPath)
+		if err != nil {
+			fmt.Println("Error creating JSON file:", err)
+			return
+		}
+		defer jsonFile.Close()
+
+		encoder := json.NewEncoder(jsonFile)
+		encoder.SetIndent("", "  ")
+		err = encoder.Encode(colorInfo)
+		if err != nil {
+			fmt.Println("Error encoding JSON file:", err)
+			return
+		}
 	}
 
 	// 根據主導顏色填充新的圖片
 	newImg := fillImageWithColors(dominantColors, 320, 320, rows, cols)
 
 	// 保存新的圖片
-	outputFile, err := os.Create("output.png")
+	outputFile, err := os.Create(*outputPath)
 	if err != nil {
 		fmt.Println("Error creating output file:", err)
 		return
@@ -119,6 +170,6 @@ func main() {
 		return
 	}
 
-	fmt.Println("New image with dominant colors created: output.png")
+	fmt.Println("New image with dominant colors created:", *outputPath)
 }
 
